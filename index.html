@@ -914,7 +914,71 @@ function esc(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// ── Sync from Apple Reminders (via iOS Shortcut URL) ─────────
+function handleSync() {
+  const params = new URLSearchParams(window.location.search);
+  const syncData = params.get('sync');
+  if (!syncData) return;
+
+  try {
+    const json = JSON.parse(decodeURIComponent(atob(syncData)));
+    // json = [{n:"task name", d:true/false}, ...]
+    let newCompleted = 0;
+
+    json.forEach(item => {
+      // Find existing task with same name
+      const existing = S.tasks.find(t => t.name === item.n);
+
+      if (!existing && !item.d) {
+        // New pending reminder → add as task
+        S.tasks.push({ id: uid(), name: item.n, done: false, doneDate: null, src: 'reminder' });
+      } else if (!existing && item.d) {
+        // Completed reminder not in our list → add as done
+        S.tasks.push({ id: uid(), name: item.n, done: true, doneDate: fmtShort(todayKey()), src: 'reminder' });
+        newCompleted++;
+      } else if (existing && !existing.done && item.d) {
+        // Existing task now completed in Reminders → mark done
+        existing.done = true;
+        existing.doneDate = fmtShort(todayKey());
+        newCompleted++;
+      }
+    });
+
+    // Remove synced tasks that are no longer in Reminders (deleted by user)
+    const syncNames = json.map(j => j.n);
+    S.tasks = S.tasks.filter(t => t.src !== 'reminder' || t.done || syncNames.includes(t.name));
+
+    save();
+
+    // Clean URL (remove ?sync=...)
+    window.history.replaceState({}, '', window.location.pathname);
+
+    // Auto-redeem if points >= 50
+    let pts = calcPts();
+    while (pts >= 50) {
+      S.earned += 1;
+      S.log.push({ type: 'earn', date: fmtShort(todayKey()) });
+      pts = calcPts();
+    }
+    save();
+
+    // Show sync result
+    if (newCompleted > 0) {
+      confetti();
+      setTimeout(() => {
+        document.getElementById('cel-t').textContent = '🔄 同步完成！';
+        document.getElementById('cel-d').textContent =
+          `新完成 ${newCompleted} 項提醒事項，+${newCompleted} 點！\n目前累積 ${calcPts()} / 50 點`;
+        showOverlay('ov-celebrate');
+      }, 300);
+    }
+  } catch (e) {
+    console.error('Sync error:', e);
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────────
+handleSync();
 render();
 </script>
 </body>
