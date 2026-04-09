@@ -915,42 +915,48 @@ function esc(s) {
 }
 
 // ── Sync from Apple Reminders (via iOS Shortcut URL) ─────────
+// Format: ?p=base64(pending names, ||| separated)&d=base64(done names, ||| separated)
 function handleSync() {
   const params = new URLSearchParams(window.location.search);
-  const syncData = params.get('sync');
-  if (!syncData) return;
+  const pData = params.get('p');  // pending (未完成)
+  const dData = params.get('d');  // done (已完成)
+  if (!pData && !dData) return;
 
   try {
-    const json = JSON.parse(decodeURIComponent(atob(syncData)));
-    // json = [{n:"task name", d:true/false}, ...]
+    const pending = pData ? atob(pData).split('|||').map(s=>s.trim()).filter(Boolean) : [];
+    const done    = dData ? atob(dData).split('|||').map(s=>s.trim()).filter(Boolean) : [];
     let newCompleted = 0;
 
-    json.forEach(item => {
-      // Find existing task with same name
-      const existing = S.tasks.find(t => t.name === item.n);
+    // Process pending reminders → add as new tasks
+    pending.forEach(name => {
+      const exists = S.tasks.find(t => t.name === name);
+      if (!exists) {
+        S.tasks.push({ id: uid(), name, done: false, doneDate: null, src: 'reminder' });
+      }
+    });
 
-      if (!existing && !item.d) {
-        // New pending reminder → add as task
-        S.tasks.push({ id: uid(), name: item.n, done: false, doneDate: null, src: 'reminder' });
-      } else if (!existing && item.d) {
-        // Completed reminder not in our list → add as done
-        S.tasks.push({ id: uid(), name: item.n, done: true, doneDate: fmtShort(todayKey()), src: 'reminder' });
+    // Process completed reminders → mark done + add points
+    done.forEach(name => {
+      const exists = S.tasks.find(t => t.name === name);
+      if (!exists) {
+        // New completed task
+        S.tasks.push({ id: uid(), name, done: true, doneDate: fmtShort(todayKey()), src: 'reminder' });
         newCompleted++;
-      } else if (existing && !existing.done && item.d) {
-        // Existing task now completed in Reminders → mark done
-        existing.done = true;
-        existing.doneDate = fmtShort(todayKey());
+      } else if (!exists.done) {
+        // Existing task now completed
+        exists.done = true;
+        exists.doneDate = fmtShort(todayKey());
         newCompleted++;
       }
     });
 
-    // Remove synced tasks that are no longer in Reminders (deleted by user)
-    const syncNames = json.map(j => j.n);
-    S.tasks = S.tasks.filter(t => t.src !== 'reminder' || t.done || syncNames.includes(t.name));
+    // Remove synced pending tasks that are no longer in Reminders
+    const allSyncNames = [...pending, ...done];
+    S.tasks = S.tasks.filter(t => t.src !== 'reminder' || t.done || allSyncNames.includes(t.name));
 
     save();
 
-    // Clean URL (remove ?sync=...)
+    // Clean URL
     window.history.replaceState({}, '', window.location.pathname);
 
     // Auto-redeem if points >= 50
@@ -962,13 +968,13 @@ function handleSync() {
     }
     save();
 
-    // Show sync result
+    // Show result
     if (newCompleted > 0) {
       confetti();
       setTimeout(() => {
         document.getElementById('cel-t').textContent = '🔄 同步完成！';
         document.getElementById('cel-d').textContent =
-          `新完成 ${newCompleted} 項提醒事項，+${newCompleted} 點！\n目前累積 ${calcPts()} / 50 點`;
+          `新完成 ${newCompleted} 項，+${newCompleted} 點！\n目前累積 ${calcPts()} / 50 點`;
         showOverlay('ov-celebrate');
       }, 300);
     }
