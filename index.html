@@ -915,16 +915,16 @@ function esc(s) {
 }
 
 // ── Sync from Apple Reminders (via iOS Shortcut URL) ─────────
-// Format: ?p=urlencoded(pending names, ||| separated)&d=urlencoded(done names, ||| separated)
+// Format: #PENDING_ITEM||ITEM~~DONE_ITEM||ITEM
+// Uses hash fragment to avoid iOS Shortcuts URL issues
 function handleSync() {
-  const params = new URLSearchParams(window.location.search);
-  const pData = params.get('p');  // pending (未完成)
-  const dData = params.get('d');  // done (已完成)
-  if (!pData && !dData) return;
+  const hash = decodeURIComponent(window.location.hash.slice(1)); // remove #
+  if (!hash) return;
 
   try {
-    const pending = pData ? pData.split('|||').map(s=>s.trim()).filter(Boolean) : [];
-    const done    = dData ? dData.split('|||').map(s=>s.trim()).filter(Boolean) : [];
+    const parts = hash.split('~~');
+    const pending = parts[0] ? parts[0].split('|||').map(s=>s.trim()).filter(Boolean) : [];
+    const done    = parts[1] ? parts[1].split('|||').map(s=>s.trim()).filter(Boolean) : [];
     let newCompleted = 0;
 
     // Process pending reminders → add as new tasks
@@ -956,7 +956,7 @@ function handleSync() {
 
     save();
 
-    // Clean URL
+    // Clean URL (remove hash)
     window.history.replaceState({}, '', window.location.pathname);
 
     // Auto-redeem if points >= 50
